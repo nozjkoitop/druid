@@ -1,0 +1,9 @@
+# placehoder file to call existing workflow
+name: "Integration Tests Workflow"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  call-existing:
+    uses: ./.github/workflows/unit-and-integration-tests-unified.yml
