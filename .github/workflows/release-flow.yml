@@ -1,0 +1,14 @@
+# placeholder so that release workflow can be triggered
+name: "Release Workflow"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  disabled-on-master:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disabled on master
+        run: |
+          echo "::error::This workflow is a placeholder on master. Use the deep/* release branches."
+          exit 1
