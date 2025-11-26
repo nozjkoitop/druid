@@ -29,7 +29,15 @@ mkdir -p druid
 cp -a "${TARBALL}" "${SHAFILE}" ./druid/
 
 ls -lh ./druid
-(cd druid && sha512sum -c "$(basename "${SHAFILE}")")
+
+expected="$(tr -d ' \t\r\n' < "druid/$(basename "${SHAFILE}")")"
+actual="$(sha512sum "druid/$(basename "${TARBALL}")" | awk '{print $1}')"
+if [[ "$actual" != "$expected" ]]; then
+  echo "::error::sha512 mismatch"
+  exit 1
+fi
+echo "sha512 OK"
+
 tar -xzf "druid/$(basename "${TARBALL}")" -C druid
 
 cd "druid/apache-druid-${VERSION}"
