@@ -3,23 +3,36 @@ set -euo pipefail
 
 echo "Running integration tests"
 
-if [[ -z "${RELEASE_BASENAME:-}" ]]; then
-  echo "::error::RELEASE_BASENAME is not set"
+VERSION="${1:-${VERSION:-}}"
+if [[ -z "${VERSION}" ]]; then
+  echo "::error::VERSION is not set (pass as arg1 or env VERSION)"
   exit 1
 fi
 
-echo "--------Verify the sha512 signature and decompress the archive --------"
+ARTIFACT_DIR="${ARTIFACT_DIR:-distribution/target}"
+
+TARBALL="${ARTIFACT_DIR}/apache-druid-${VERSION}-bin.tar.gz"
+SHAFILE="${ARTIFACT_DIR}/apache-druid-${VERSION}-bin.tar.gz.sha512"
+
+if [[ ! -f "${TARBALL}" ]]; then
+  echo "::error::Missing tarball: ${TARBALL}"
+  exit 1
+fi
+if [[ ! -f "${SHAFILE}" ]]; then
+  echo "::error::Missing sha512: ${SHAFILE}"
+  exit 1
+fi
+
+echo "-------- Verify the sha512 signature and decompress the archive --------"
 
 mkdir -p druid
-cp -a "${RELEASE_BASENAME}.tar.gz" ./druid/
-cp -a "${RELEASE_BASENAME}.tar.gz.sha512" ./druid/
+cp -a "${TARBALL}" "${SHAFILE}" ./druid/
 
 ls -lh ./druid
-(cd druid && sha512sum -c "${RELEASE_BASENAME}.tar.gz.sha512")
-tar -xzf "druid/${RELEASE_BASENAME}.tar.gz" -C druid
+(cd druid && sha512sum -c "$(basename "${SHAFILE}")")
+tar -xzf "druid/$(basename "${TARBALL}")" -C druid
 
-
-cd "druid/apache-druid-${RELEASE_BASENAME}"
+cd "druid/apache-druid-${VERSION}"
 
 echo "-------- Start Druid (micro-quickstart) and run health checks --------"
 
@@ -48,17 +61,19 @@ check_health "Coordinator" 8081
 check_health "Broker" 8082
 check_health "Historical" 8083
 
-
 echo "-------- Load sample data using batch ingestion --------"
 
-TASK_ID=$(curl -X 'POST' -H 'Content-Type:application/json' -d @quickstart/tutorial/wikipedia-index.json http://localhost:8081/druid/indexer/v1/task | jq -r .task)
+TASK_ID=$(curl -fsS -X 'POST' -H 'Content-Type:application/json' \
+  -d @quickstart/tutorial/wikipedia-index.json \
+  http://localhost:8081/druid/indexer/v1/task | jq -r .task)
+
 echo "TASK_ID=$TASK_ID"
 
 for _ in {1..120}; do
   STATUS=$(curl -fsS "http://localhost:8888/druid/indexer/v1/task/${TASK_ID}/status" | jq -r .status.status)
   echo "Status: $STATUS"
-  if [ "$STATUS" = "SUCCESS" ]; then echo "Ingestion is successful!"; break; fi
-  if [ "$STATUS" = "FAILED" ]; then echo "::error::Ingestion failed"; exit 1; fi
+  if [[ "$STATUS" == "SUCCESS" ]]; then echo "Ingestion is successful!"; break; fi
+  if [[ "$STATUS" == "FAILED" ]]; then echo "::error::Ingestion failed"; exit 1; fi
   sleep 3
 done
 
@@ -68,10 +83,11 @@ curl -s "http://localhost:8081/druid/indexer/v1/task/${TASK_ID}/reports" \
   || echo "No rowStats in reports"
 echo
 
-echo "-------- WAIT FOR SEGMENTS TO LOAD  --------"
+echo "-------- WAIT FOR SEGMENTS TO LOAD --------"
 
 MAX_WAIT=120
 WAITED=0
+SEG_COUNT=0
 
 echo "Waiting for segments for datasource wikipedia ..."
 
@@ -79,12 +95,6 @@ while [ $WAITED -lt $MAX_WAIT ]; do
   RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
     http://localhost:8888/druid/v2/sql \
     -d '{"query":"SELECT COUNT(*) AS c FROM sys.segments WHERE datasource='\''wikipedia'\''"}')
-  CURL_STATUS=$?
-
-  if [ $CURL_STATUS -ne 0 ] || [ -z "$RESPONSE" ]; then
-    echo "::error::curl to Druid failed (exit code: $CURL_STATUS)"
-    exit 1
-  fi
 
   SEG_COUNT=$(echo "$RESPONSE" | jq -r '.[0].c // 0')
 
@@ -112,9 +122,9 @@ echo
 
 echo "-------- Run and verify native group-by query --------"
 
-NATIVE=$(curl -X POST -H "Content-Type:application/json" \
+NATIVE=$(curl -fsS -X POST -H "Content-Type:application/json" \
   http://localhost:8888/druid/v2 \
-  -d @../../.github/workflows/queries/native_query.json)
+  -d @../../.github/resources/native_query.json)
 
 COUNT=$(jq 'length' <<<"$NATIVE")
 
@@ -125,12 +135,11 @@ else
   exit 1
 fi
 
-
 echo "-------- Run and verify SQL query --------"
 
-SQL=$(curl -X POST -H "Content-Type: application/json" \
+SQL=$(curl -fsS -X POST -H "Content-Type: application/json" \
   http://localhost:8888/druid/v2/sql \
-  -d @../../.github/workflows/queries/sql_query.json)
+  -d @../../.github/resources/sql_query.json)
 
 COUNT=$(jq 'length' <<<"$SQL")
 
@@ -143,27 +152,27 @@ fi
 
 echo "-------- Run and verify MSQ query --------"
 
-MSQ=$(curl -X POST -H "Content-Type:application/json" \
+MSQ=$(curl -fsS -X POST -H "Content-Type:application/json" \
   http://localhost:8888/druid/v2/sql/statements \
-  -d @../../.github/workflows/queries/sql_query.json)
+  -d @../../.github/resources/sql_query.json)
 
-TASK_ID=$(echo "$MSQ" | jq -r '.queryId')
+MSQ_ID=$(echo "$MSQ" | jq -r '.queryId')
 
-if [[ -z "$TASK_ID" ]]; then
+if [[ -z "$MSQ_ID" || "$MSQ_ID" == "null" ]]; then
   echo "::error::Failed to extract MSQ task ID"
   exit 1
 fi
-echo "Task ID is $TASK_ID"
+echo "Task ID is $MSQ_ID"
 
 for _ in {1..120}; do
-  STATUS=$(curl -fsS "http://localhost:8888/druid/v2/sql/statements/${TASK_ID}" | jq -r .state)
-  echo "MSQ status: $STATUS"
-  if [ "$STATUS" = "SUCCESS" ]; then echo "Running MSQ query is successful!"; break; fi
-  if [ "$STATUS" = "FAILED" ]; then echo "::error::MSQ query failed"; exit 1; fi
+  STATE=$(curl -fsS "http://localhost:8888/druid/v2/sql/statements/${MSQ_ID}" | jq -r .state)
+  echo "MSQ status: $STATE"
+  if [[ "$STATE" == "SUCCESS" ]]; then echo "Running MSQ query is successful!"; break; fi
+  if [[ "$STATE" == "FAILED" ]]; then echo "::error::MSQ query failed"; exit 1; fi
   sleep 3
 done
 
-COUNT=$(curl -fsS "http://localhost:8888/druid/v2/sql/statements/${TASK_ID}/results" | jq 'length')
+COUNT=$(curl -fsS "http://localhost:8888/druid/v2/sql/statements/${MSQ_ID}/results" | jq 'length')
 if [[ "$COUNT" -ge 1 ]]; then
   echo "MSQ query is successful. Response contains $COUNT rows"
 else

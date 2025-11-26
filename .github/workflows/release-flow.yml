@@ -49,14 +49,10 @@ jobs:
           test -f "distribution/target/apache-druid-${v}-bin.tar.gz.sha512"
 
       - name: Run binary integration tests
-        env:
-          RELEASE_VERSION: ${{ steps.get-version.outputs.content }}
-          ARTIFACT_DIR: distribution/target
-          QUERIES_DIR: .github/workflows/queries
         run: |
           set -euo pipefail
           chmod +x .github/scripts/test_dist.sh
-          .github/scripts/test_dist.sh
+          .github/scripts/test_dist.sh "${{ steps.get-version.outputs.content }}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
