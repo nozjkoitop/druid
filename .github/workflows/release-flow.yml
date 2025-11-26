@@ -14,7 +14,7 @@ jobs:
       - name: Release Branch Name Validation
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF" =~ ^refs/heads/release*$ ]]; then
+          if [[ ! "$GITHUB_REF" =~ ^refs/heads/release.*$ ]]; then
             echo "::error::Release workflow only valid for release* branches"
             exit 1
           fi
