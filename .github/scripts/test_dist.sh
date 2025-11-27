@@ -102,7 +102,7 @@ echo "Waiting for segments for datasource wikipedia ..."
 while [ $WAITED -lt $MAX_WAIT ]; do
   RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
     http://localhost:8888/druid/v2/sql \
-    -d '{"query":"SELECT COUNT(*) AS c FROM sys.segments WHERE datasource='\''wikipedia'\''"}')
+    -d '{"query":"SELECT COUNT(*) AS c FROM sys.segments WHERE datasource='\''wikipedia'\'' AND is_available = 1"}')
 
   SEG_COUNT=$(echo "$RESPONSE" | jq -r '.[0].c // 0')
 
