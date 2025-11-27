@@ -161,10 +161,10 @@ fi
 echo "-------- Run and verify MSQ query --------"
 
 MSQ=$(curl -fsS -X POST -H "Content-Type:application/json" \
-  http://localhost:8888/druid/v2/sql/statements \
+  http://localhost:8888/druid/v2/sql/task \
   -d @../../.github/resources/sql_query.json)
 
-MSQ_ID=$(echo "$MSQ" | jq -r '.queryId')
+MSQ_ID=$(echo "$MSQ" | jq -r '.taskId')
 
 if [[ -z "$MSQ_ID" || "$MSQ_ID" == "null" ]]; then
   echo "::error::Failed to extract MSQ task ID"
@@ -173,14 +173,14 @@ fi
 echo "Task ID is $MSQ_ID"
 
 for _ in {1..120}; do
-  STATE=$(curl -fsS "http://localhost:8888/druid/v2/sql/statements/${MSQ_ID}" | jq -r .state)
+  STATE=$(curl -fsS "http://localhost:8888/druid/indexer/v1/task/${MSQ_ID}/status" | jq -r .status.statusCode)
   echo "MSQ status: $STATE"
   if [[ "$STATE" == "SUCCESS" ]]; then echo "Running MSQ query is successful!"; break; fi
   if [[ "$STATE" == "FAILED" ]]; then echo "::error::MSQ query failed"; exit 1; fi
   sleep 3
 done
 
-COUNT=$(curl -fsS "http://localhost:8888/druid/v2/sql/statements/${MSQ_ID}/results" | jq 'length')
+COUNT=$(curl -fsS "http://localhost:8888/druid/indexer/v1/task/${MSQ_ID}/reports" | jq '.multiStageQuery.payload.results.results | length')
 if [[ "$COUNT" -ge 1 ]]; then
   echo "MSQ query is successful. Response contains $COUNT rows"
 else
